@@ -34,6 +34,10 @@ core.*
 *.zip
 *.deb
 *.rpm
+*.apk
+
+# GoReleaser output
+dist/
 
 # Temporary files
 tmp/

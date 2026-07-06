@@ -1,4 +1,6 @@
 # Mosquitto Message Logger - Build Commands (Zig)
+#
+# Targets mosquitto 2.1.x (plugin API v5).
 
 # Default recipe - show available commands
 default:
@@ -8,7 +10,7 @@ default:
 build:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "Building for all architectures (glibc + musl) using Zig..."
+    echo "Building all architectures (glibc + musl) using Zig..."
     zig build all -Doptimize=ReleaseSafe
     echo ""
     echo "Build complete! Binaries in zig-out/dist/:"
@@ -138,10 +140,10 @@ config:
     @echo "=============="
     @echo ""
     @echo "Add to mosquitto.conf:"
-    @echo "  plugin $(shell pwd)/zig-out/dist/libmosquitto_message_logger-<arch>.so"
+    @echo "  plugin $(pwd)/zig-out/dist/libmosquitto_message_logger-<arch>.so"
     @echo ""
     @echo "Example for aarch64:"
-    @echo "  plugin $(shell pwd)/zig-out/dist/libmosquitto_message_logger-aarch64.so"
+    @echo "  plugin $(pwd)/zig-out/dist/libmosquitto_message_logger-aarch64.so"
     @echo ""
     @echo "Environment Variables:"
     @echo "  MQTT_LOG_DIR=/path/to/logs      (default: /var/log/mosquitto)"
@@ -157,11 +159,29 @@ config:
 format:
     clang-format -i mosquitto_message_logger.c
 
+# Build release archives + linux packages (deb/rpm/apk) locally with GoReleaser.
+# Output goes to dist/. Requires goreleaser (and zig).
+package:
+    goreleaser release --snapshot --clean --skip=publish,sign
+    @echo ""
+    @echo "Artifacts in dist/:"
+    @ls -1 dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.apk 2>/dev/null
+
+# Validate the GoReleaser configuration
+package-check:
+    goreleaser check
+
 # Run tests (build and verify all architectures)
 test: build check-glibc
     @echo ""
     @echo "✓ All architectures built successfully"
     @echo "✓ glibc requirements verified"
+
+# Run the Docker-based functional test suite (requires Docker).
+# Default version: 2.1.2. Override by passing versions, e.g.:
+#   just test-docker 2.1.2
+test-docker *versions:
+    tests/run.sh {{versions}}
 
 # Run a test mosquitto instance with the plugin
 test-local:
@@ -199,10 +219,11 @@ test-local:
     esac
     
     # Determine plugin file based on OS
+    DIST_DIR="$(pwd)/zig-out/dist"
     if [[ "$OS" == "darwin" ]]; then
-        SO_FILE="$(pwd)/zig-out/dist/libmosquitto_message_logger-macos-${ARCH_NAME}.dylib"
+        SO_FILE="${DIST_DIR}/libmosquitto_message_logger-macos-${ARCH_NAME}.dylib"
     else
-        SO_FILE="$(pwd)/zig-out/dist/libmosquitto_message_logger-${ARCH_NAME}.so"
+        SO_FILE="${DIST_DIR}/libmosquitto_message_logger-${ARCH_NAME}.so"
     fi
     
     echo "Detected: $OS / $ARCH (mapped to: $ARCH_NAME)"

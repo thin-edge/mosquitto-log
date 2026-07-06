@@ -1,0 +1,85 @@
+# GoReleaser configuration for the mosquitto message logger plugin.
+# https://goreleaser.com
+#
+#   goreleaser release --snapshot --clean   # local test: builds + archives + packages
+#   goreleaser release --clean              # real release (needs a git tag)
+#
+# The plugin is a shared library (.so) cross-compiled with Zig via GoReleaser's
+# experimental Zig builder:
+#   https://goreleaser.com/customization/builds/builders/zig/
+# The compilation is driven by build.zig, which installs the .so under bin/ with a
+# stable, architecture-independent name that GoReleaser picks up.
+#
+# Architecture note: the Zig builder maps zig target triples to GOOS/GOARCH for
+# packaging. amd64 and arm64 come out correct; 32-bit x86 is labeled "x86" (not
+# "i386"), and 32-bit arm is labeled "arm" (it can't distinguish armhf from armel,
+# so only one 32-bit arm variant is shipped — hard-float / armhf here). Correct
+# i386/armhf/armel labels would require GoReleaser Pro's `prebuilt` builder.
+version: 2
+
+project_name: mosquitto-message-logger
+
+builds:
+  - id: plugin
+    builder: zig
+    # Stable, architecture-independent file name so the plugin path in
+    # mosquitto.conf is identical on every target (see build.zig, which installs
+    # the .so under bin/ with this exact name for GoReleaser to pick up).
+    binary: mosquitto_message_logger.so
+    # Pass the release version through to the plugin (reported to the broker via
+    # mosquitto_plugin_set_info). Setting `flags` replaces the builder's default,
+    # so -Doptimize=ReleaseSafe is repeated here.
+    flags:
+      - -Doptimize=ReleaseSafe
+      - -Dplugin-version={{ .Version }}
+    # Zig target triples. build.zig pins an old glibc for gnu/linux targets so
+    # the packages install across a wide range of distributions.
+    targets:
+      - x86_64-linux-gnu # amd64
+      - x86-linux-gnu # x86 (labeled "x86")
+      - aarch64-linux-gnu # arm64
+      - arm-linux-gnueabihf # arm, hard-float / armhf (labeled "arm")
+
+archives:
+  - id: plugin
+    ids: [plugin]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+nfpms:
+  - id: plugin
+    ids: [plugin]
+    package_name: mosquitto-message-logger
+    vendor: thin-edge.io
+    homepage: https://thin-edge.io
+    maintainer: thin-edge.io contributors <info@thin-edge.io>
+    description: |-
+      Mosquitto broker plugin that logs MQTT messages and control-plane events
+      (connect/disconnect/subscribe/unsubscribe) with rich metadata to file
+      and/or stderr.
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+      - apk
+    # Install the plugin at a fixed, architecture-independent path. Configure it
+    # in mosquitto.conf with:
+    #   plugin /usr/lib/mosquitto/mosquitto_message_logger.so
+    bindir: /usr/lib/mosquitto
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: thin-edge
+    name: mosquitto-message-logger

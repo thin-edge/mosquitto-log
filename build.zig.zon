@@ -4,10 +4,11 @@
     .fingerprint = 0xc220744a7dcdd755,
     .minimum_zig_version = "0.16.0",
     
+    // Mosquitto 2.1.x headers, used only for the plugin API (v5) at build time.
     .dependencies = .{
         .mosquitto = .{
-            .url = "https://github.com/eclipse-mosquitto/mosquitto/archive/refs/tags/v2.0.22.tar.gz",
-            .hash = "N-V-__8AAOcuXQD1O5pBWl7c4CokMwtP1oKEz39pEOIexeNh",
+            .url = "https://github.com/eclipse-mosquitto/mosquitto/archive/refs/tags/v2.1.2.tar.gz",
+            .hash = "N-V-__8AAB8HiwBqCVgUVgTOCjUdHEi1WeW6eBlhY-jMLymr",
         },
     },
 
@@ -15,6 +16,7 @@
         "build.zig",
         "build.zig.zon",
         "mosquitto_message_logger.c",
+        "compat",
         "README.md",
         "LICENSE",
     },
