@@ -63,6 +63,17 @@ jobs:
             goreleaser release -f cli/.goreleaser.yaml --snapshot --clean --skip=publish,sign
           fi
 
+      # Publish the deb/rpm/apk packages (both plugin and CLI, under dist/) to
+      # the thin-edge Cloudsmith repository. Tag pushes only, and skipped
+      # gracefully when the Cloudsmith API key secret is not configured.
+      - name: Publish to Cloudsmith (Linux package repo)
+        if: github.ref_type == 'tag' && env.PUBLISH_TOKEN
+        env:
+          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+          PUBLISH_OWNER: ${{ secrets.PUBLISH_OWNER }}
+          PUBLISH_REPO: ${{ secrets.PUBLISH_REPO }}
+        run: ./ci/publish.sh --path dist --owner "$PUBLISH_OWNER" --repo "$PUBLISH_REPO"
+
       # On a manual dry run, keep the snapshot artifacts for inspection.
       - name: Upload snapshot artifacts (dry run only)
         if: github.ref_type != 'tag'
