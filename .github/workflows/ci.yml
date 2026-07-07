@@ -1,0 +1,91 @@
+# CI: validates every pull request (and pushes to main) before merge.
+#
+# Jobs:
+#   unit-tests       -> `zig build test` (CLI unit tests)
+#   build-all        -> `zig build all` cross-compiles every supported arch
+#   functional-tests -> tests/run.sh (Docker: real broker + plugin, end-to-end)
+#   goreleaser-check -> validates both packaging configs without publishing
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same branch/PR to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Unit tests (CLI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read Zig version
+        id: zig
+        run: echo "version=$(sed -n 's/.*minimum_zig_version = "\([^"]*\)".*/\1/p' build.zig.zon)" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zig.outputs.version }}
+      - name: Run CLI unit tests
+        run: zig build test --summary all
+
+  build-all:
+    name: Cross-compile all architectures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read Zig version
+        id: zig
+        run: echo "version=$(sed -n 's/.*minimum_zig_version = "\([^"]*\)".*/\1/p' build.zig.zon)" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zig.outputs.version }}
+      - name: Build every target (glibc + musl + macOS)
+        run: zig build all -Doptimize=ReleaseSafe
+      - name: List artifacts
+        run: |
+          echo "Built artifacts:"
+          ls -lh zig-out/dist/
+          file zig-out/dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: zig-out/dist/
+          if-no-files-found: error
+
+  functional-tests:
+    name: Functional tests (Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read Zig version
+        id: zig
+        run: echo "version=$(sed -n 's/.*minimum_zig_version = "\([^"]*\)".*/\1/p' build.zig.zon)" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zig.outputs.version }}
+      # Docker is preinstalled on ubuntu-latest runners. The suite builds a
+      # mosquitto 2.1 broker image from source on first use, then loads the
+      # freshly cross-built plugin and asserts the logged output.
+      - name: Run Docker functional test suite
+        run: tests/run.sh
+
+  goreleaser-check:
+    name: Validate release configs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          install-only: true
+      - name: Check plugin config
+        run: goreleaser check -f plugin/.goreleaser.yaml
+      - name: Check CLI config
+        run: goreleaser check -f cli/.goreleaser.yaml
