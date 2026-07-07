@@ -26,7 +26,7 @@
 # i386/armhf/armel labels would require GoReleaser Pro's `prebuilt` builder.
 version: 2
 
-project_name: mosquitto-log-cli
+project_name: mosquitto-log-plugin
 
 # Separate output dir so the plugin and CLI runs don't clobber each other's
 # artifacts (each uses --clean on its own dist/).
@@ -65,7 +65,6 @@ archives:
 nfpms:
   - id: plugin
     ids: [plugin]
-    package_name: mosquitto-log-cli
     vendor: thin-edge.io
     homepage: https://thin-edge.io
     maintainer: thin-edge.io contributors <info@thin-edge.io>

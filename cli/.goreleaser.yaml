@@ -17,7 +17,7 @@
 # zig triples to GOOS/GOARCH; 32-bit x86 is "x86" and 32-bit arm is "arm" (armhf).
 version: 2
 
-project_name: mqtt-log
+project_name: mosquitto-log-client
 
 # Own output dir so `--clean` here doesn't wipe the plugin's artifacts.
 dist: dist/cli
@@ -48,7 +48,6 @@ archives:
 nfpms:
   - id: cli
     ids: [cli]
-    package_name: mqtt-log
     vendor: thin-edge.io
     homepage: https://thin-edge.io
     maintainer: thin-edge.io contributors <info@thin-edge.io>
