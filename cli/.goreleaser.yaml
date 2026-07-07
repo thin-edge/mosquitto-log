@@ -50,6 +50,8 @@ nfpms:
     ids: [cli]
     vendor: thin-edge.io
     homepage: https://thin-edge.io
+    provides:
+      - mqtt-log
     maintainer: thin-edge.io contributors <info@thin-edge.io>
     description: |-
       Command-line tool to filter and format the JSON-Lines log files written
