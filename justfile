@@ -22,116 +22,33 @@ build:
 # Alias for build
 all: build
 
-# Build for x86_64 Linux
-build-x86_64:
-    zig build -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSafe
-    @echo "Built: zig-out/lib/libmosquitto_message_logger.so"
-    @file zig-out/lib/libmosquitto_message_logger.so
+# Build the companion query CLI (mqtt-log) for the host
+build-cli:
+    zig build -Doptimize=ReleaseSafe
+    @echo "Built: zig-out/bin/mqtt-log"
+    @file zig-out/bin/mqtt-log
 
-# Build for x86 (32-bit) Linux
-build-x86:
-    zig build -Dtarget=x86-linux-gnu -Doptimize=ReleaseSafe
-    @echo "Built: zig-out/lib/libmosquitto_message_logger.so"
-    @file zig-out/lib/libmosquitto_message_logger.so
+# Run the query CLI, forwarding arguments (e.g. `just run-cli --help`)
+run-cli *ARGS:
+    zig build run -- {{ARGS}}
 
-# Build for ARM64 (aarch64) Linux
-build-arm64:
-    zig build -Dtarget=aarch64-linux-gnu -Doptimize=ReleaseSafe
-    @echo "Built: zig-out/lib/libmosquitto_message_logger.so"
-    @file zig-out/lib/libmosquitto_message_logger.so
+# Run the CLI unit tests
+test-cli:
+    zig build test --summary all
 
-# Build for ARMv7 Linux
-build-armv7:
-    zig build -Dtarget=arm-linux-gnueabihf -Doptimize=ReleaseSafe
-    @echo "Built: zig-out/lib/libmosquitto_message_logger.so"
-    @file zig-out/lib/libmosquitto_message_logger.so
+# Target triple examples: aarch64-linux-gnu, x86_64-linux-musl, aarch64-macos,
+# arm-linux-gnueabihf (add `-Dcpu=arm1176jzf_s` for ARMv6). Extra flags forward.
 
-# Build for ARMv6 Linux (Raspberry Pi 1, Zero)
-build-armv6:
-    zig build -Dtarget=arm-linux-gnueabihf -Dcpu=arm1176jzf_s -Doptimize=ReleaseSafe
-    @echo "Built: zig-out/lib/libmosquitto_message_logger.so"
-    @file zig-out/lib/libmosquitto_message_logger.so
-
-# Build for macOS ARM64
-build-macos:
-    zig build -Dtarget=aarch64-macos -Doptimize=ReleaseSafe
-    @echo "Built: zig-out/lib/libmosquitto_message_logger.dylib"
-    @file zig-out/lib/libmosquitto_message_logger.dylib
-
-# Build for RISC-V 64-bit Linux
-build-riscv64:
-    zig build -Dtarget=riscv64-linux-gnu -Doptimize=ReleaseSafe
-    @echo "Built: zig-out/lib/libmosquitto_message_logger.so"
-    @file zig-out/lib/libmosquitto_message_logger.so
-
-# Build for x86_64 Linux (musl / Alpine)
-build-x86_64-musl:
-    zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
-    @echo "Built: zig-out/lib/libmosquitto_message_logger.so"
-    @file zig-out/lib/libmosquitto_message_logger.so
-
-# Build for x86 (32-bit) Linux (musl / Alpine)
-build-x86-musl:
-    zig build -Dtarget=x86-linux-musl -Doptimize=ReleaseSafe
-    @echo "Built: zig-out/lib/libmosquitto_message_logger.so"
-    @file zig-out/lib/libmosquitto_message_logger.so
-
-# Build for ARM64 (aarch64) Linux (musl / Alpine)
-build-arm64-musl:
-    zig build -Dtarget=aarch64-linux-musl -Doptimize=ReleaseSafe
-    @echo "Built: zig-out/lib/libmosquitto_message_logger.so"
-    @file zig-out/lib/libmosquitto_message_logger.so
-
-# Build for ARMv7 Linux (musl / Alpine)
-build-armv7-musl:
-    zig build -Dtarget=arm-linux-musleabihf -Doptimize=ReleaseSafe
-    @echo "Built: zig-out/lib/libmosquitto_message_logger.so"
-    @file zig-out/lib/libmosquitto_message_logger.so
-
-# Build for ARMv6 Linux (musl / Alpine)
-build-armv6-musl:
-    zig build -Dtarget=arm-linux-musleabihf -Dcpu=arm1176jzf_s -Doptimize=ReleaseSafe
-    @echo "Built: zig-out/lib/libmosquitto_message_logger.so"
-    @file zig-out/lib/libmosquitto_message_logger.so
-
-# Build for RISC-V 64-bit Linux (musl / Alpine)
-build-riscv64-musl:
-    zig build -Dtarget=riscv64-linux-musl -Doptimize=ReleaseSafe
-    @echo "Built: zig-out/lib/libmosquitto_message_logger.so"
-    @file zig-out/lib/libmosquitto_message_logger.so
+# Build the plugin + CLI for one Zig target triple (use `just build` for all archs).
+build-target target *flags:
+    zig build -Dtarget={{target}} -Doptimize=ReleaseSafe {{flags}}
+    @echo "Built {{target}}:"
+    @file zig-out/bin/mqtt-log zig-out/bin/mosquitto_message_logger.so
 
 # Clean build artifacts
 clean:
     rm -rf zig-out .zig-cache
     @echo "Cleaned build artifacts"
-
-# Show plugin info
-info:
-    @echo "Built binaries:"
-    @ls -lh zig-out/dist/*.{so,dylib} 2>/dev/null || echo "No binaries found. Run: just build"
-    @echo ""
-    @echo "Architectures:"
-    @file zig-out/dist/*.{so,dylib} 2>/dev/null || true
-
-# Check glibc version requirements for Linux binaries
-check-glibc:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "Checking glibc version requirements..."
-    echo ""
-    for f in zig-out/dist/*.so; do
-        if [ -f "$f" ]; then
-            basename="$(basename "$f")"
-            max_version=$(nm -D "$f" 2>/dev/null | grep GLIBC | sed 's/.*GLIBC_//' | sort -V | uniq | tail -1)
-            echo "$basename: GLIBC $max_version"
-        fi
-    done
-    echo ""
-    echo "Compatibility guide:"
-    echo "  2.4  = Very old systems (2006+)"
-    echo "  2.17 = RHEL 7 / CentOS 7 (2013+)"
-    echo "  2.19 = Ubuntu 14.04 (2014+)"
-    echo "  2.27 = Ubuntu 18.04 / Debian 10 (2018+)"
 
 # Show configuration instructions
 config:
@@ -157,22 +74,31 @@ config:
 
 # Format the code (requires clang-format)
 format:
-    clang-format -i mosquitto_message_logger.c
+    clang-format -i plugin/mosquitto_message_logger.c
 
-# Build release archives + linux packages (deb/rpm/apk) locally with GoReleaser.
-# Output goes to dist/. Requires goreleaser (and zig).
+# Build both tools' release archives + linux packages (deb/rpm/apk) locally with
+# GoReleaser. Each tool has its own config and writes to dist/plugin and dist/cli.
 package:
-    goreleaser release --snapshot --clean --skip=publish,sign
+    goreleaser release -f plugin/.goreleaser.yaml --snapshot --clean --skip=publish,sign
+    goreleaser release -f cli/.goreleaser.yaml    --snapshot --clean --skip=publish,sign
     @echo ""
-    @echo "Artifacts in dist/:"
-    @ls -1 dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.apk 2>/dev/null
+    @echo "Artifacts in dist/plugin and dist/cli:"
+    @ls -1 dist/plugin/* dist/cli/* 2>/dev/null | grep -E '\.(tar\.gz|deb|rpm|apk)$'
 
-# Validate the GoReleaser configuration
+# Publish a real combined release to GitHub (needs a git tag + GITHUB_TOKEN).
+# The plugin config creates the release; the CLI config appends to it, so order
+# matters. Run `git tag vX.Y.Z && git push --tags` first.
+release:
+    goreleaser release -f plugin/.goreleaser.yaml --clean
+    goreleaser release -f cli/.goreleaser.yaml    --clean
+
+# Validate both GoReleaser configurations
 package-check:
-    goreleaser check
+    goreleaser check -f plugin/.goreleaser.yaml
+    goreleaser check -f cli/.goreleaser.yaml
 
 # Run tests (build and verify all architectures)
-test: build check-glibc
+test: build
     @echo ""
     @echo "✓ All architectures built successfully"
     @echo "✓ glibc requirements verified"
@@ -251,7 +177,7 @@ test-local:
     
     # Create a minimal config
     cat > test_mosquitto.conf << EOFCONFIG
-    listener 1883
+    listener 0 mosquitto.sock
     allow_anonymous true
     plugin ${SO_FILE}
     EOFCONFIG

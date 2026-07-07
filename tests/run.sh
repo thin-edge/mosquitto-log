@@ -86,8 +86,8 @@ log_line_for() { printf '%s\n' "$1" | grep -F -- "$2" | head -1; }
 
 # poll the log file until <marker> appears (for events with no publish to drive)
 wait_for_log() {
-    local marker="$1" i
-    for i in $(seq 1 20); do
+    local marker="$1" _i
+    for _i in $(seq 1 20); do
         if read_logfile | grep -qF -- "$marker"; then return 0; fi
         sleep 0.25
     done
@@ -229,6 +229,47 @@ run_version() {
     log="$(read_logfile)"
     assert_contains "$ver · publish_out: type"  '"type":"publish_out"' "$log"
     assert_contains "$ver · publish_out: topic" '"topic":"test/sub"'   "$(log_line_for "$log" '"type":"publish_out"')"
+
+    # --- T8: redaction — Cumulocity JWT (c8y/s/dat), "71,<jwt>" ---
+    local jwt jwt_b64
+    jwt="dummy_jwt"
+    pub_and_wait '"topic":"c8y/s/dat"' -t c8y/s/dat -m "71,$jwt" -i pub-jwt || true
+    log="$(read_logfile)"
+    line="$(log_line_for "$log" '"topic":"c8y/s/dat"')"
+    assert_contains     "$ver · redact jwt: masked payload" '"payload":"71,***"' "$line"
+    assert_contains     "$ver · redact jwt: redacted flag"  '"redacted":true'    "$line"
+    assert_not_contains "$ver · redact jwt: token gone"      "$jwt"              "$line"
+    # the secret must not survive in ANY representation, incl. base64
+    jwt_b64="$(printf '71,%s' "$jwt" | base64 | tr -d '\n')"
+    assert_not_contains "$ver · redact jwt: base64 not raw"  "$jwt_b64"          "$line"
+    assert_contains     "$ver · redact jwt: base64 of mask"  \
+        "\"payload_base64\":\"$(printf '71,***' | base64 | tr -d '\n')\""       "$line"
+
+    # --- T9: redaction — Cumulocity device credentials (c8y/s/dcr) ---
+    pub_and_wait '"topic":"c8y/s/dcr"' -t c8y/s/dcr -m "70,t12345,device_ABC,s3cr3tPass" -i pub-cred || true
+    log="$(read_logfile)"
+    line="$(log_line_for "$log" '"topic":"c8y/s/dcr"')"
+    assert_contains     "$ver · redact cred: user+pass masked" '"payload":"70,t12345,***,***"' "$line"
+    assert_not_contains "$ver · redact cred: password gone"    's3cr3tPass'                    "$line"
+    assert_not_contains "$ver · redact cred: username gone"    'device_ABC'                    "$line"
+
+    # --- T10: redaction — JSON sensitive keys (masked in every JSON form) ---
+    pub_and_wait '"topic":"redact/json"' -t redact/json \
+        -m '{"user":"admin","password":"hunter2"}' -i pub-rjson || true
+    log="$(read_logfile)"
+    line="$(log_line_for "$log" '"topic":"redact/json"')"
+    assert_contains     "$ver · redact json: native json"   '"payload_json":{"user":"admin","password":"***"}' "$line"
+    assert_contains     "$ver · redact json: escaped string" '"payload":"{\"user\":\"admin\",\"password\":\"***\"}"' "$line"
+    assert_not_contains "$ver · redact json: secret gone"    'hunter2'                                           "$line"
+    assert_not_contains "$ver · redact json: base64 not raw" "$(printf '%s' '{"user":"admin","password":"hunter2"}' | base64 | tr -d '\n')" "$line"
+
+    # --- T11: a non-sensitive key sitting next to a same-named string value ---
+    pub_and_wait '"topic":"redact/note"' -t redact/note \
+        -m '{"note":"the password is safe"}' -i pub-note || true
+    log="$(read_logfile)"
+    line="$(log_line_for "$log" '"topic":"redact/note"')"
+    assert_contains     "$ver · redact note: value untouched" '"payload_json":{"note":"the password is safe"}' "$line"
+    assert_not_contains "$ver · redact note: no redacted flag" '"redacted"'                                     "$line"
 
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 }

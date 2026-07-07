@@ -15,8 +15,8 @@
     .paths = .{
         "build.zig",
         "build.zig.zon",
-        "mosquitto_message_logger.c",
-        "compat",
+        "plugin",
+        "cli",
         "README.md",
         "LICENSE",
     },

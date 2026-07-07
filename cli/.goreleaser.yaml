@@ -1,0 +1,83 @@
+# GoReleaser configuration for the mqtt-log QUERY CLI.
+# https://goreleaser.com
+#
+# Companion to ../plugin/.goreleaser.yaml. Both publish to the SAME GitHub
+# release/tag; the plugin config creates the release and this one appends to it
+# (release.mode: append), so the plugin MUST be released first. Run from the
+# repo root:
+#
+#   goreleaser release -f plugin/.goreleaser.yaml --clean   # creates the release
+#   goreleaser release -f cli/.goreleaser.yaml    --clean   # appends the CLI
+#
+# The CLI is pure Zig (no mosquitto headers). It is built by the same shared
+# ../build.zig; GoReleaser's Zig builder runs `zig build` per target and picks
+# up zig-out/<target>/bin/mqtt-log.
+#
+# Architecture labelling note: same as the plugin config — the Zig builder maps
+# zig triples to GOOS/GOARCH; 32-bit x86 is "x86" and 32-bit arm is "arm" (armhf).
+version: 2
+
+project_name: mqtt-log
+
+# Own output dir so `--clean` here doesn't wipe the plugin's artifacts.
+dist: dist/cli
+
+builds:
+  - id: cli
+    builder: zig
+    binary: mqtt-log
+    # `flags` replaces the builder default, so repeat the optimize mode. The
+    # plugin-version option is irrelevant to the CLI and intentionally omitted.
+    flags:
+      - -Doptimize=ReleaseSafe
+    targets:
+      - x86_64-linux-gnu # amd64
+      - x86-linux-gnu # x86 (labeled "x86")
+      - aarch64-linux-gnu # arm64
+      - arm-linux-gnueabihf # arm, hard-float / armhf (labeled "arm")
+
+archives:
+  - id: cli
+    ids: [cli]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+nfpms:
+  - id: cli
+    ids: [cli]
+    package_name: mqtt-log
+    vendor: thin-edge.io
+    homepage: https://thin-edge.io
+    maintainer: thin-edge.io contributors <info@thin-edge.io>
+    description: |-
+      Command-line tool to filter and format the JSON-Lines log files written
+      by the mosquitto message logger plugin (filter by time, topic, type,
+      payload and more; text/list/table/json/ndjson/template output).
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+      - apk
+    # Install mqtt-log onto PATH.
+    bindir: /usr/bin
+
+# Per-tool checksum file name so it doesn't collide with the plugin's on the
+# shared release.
+checksum:
+  name_template: "{{ .ProjectName }}_checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  disable: true
+
+# Append to the release created by the plugin config (same repo/tag).
+release:
+  github:
+    owner: thin-edge
+    name: mosquitto-log
+  mode: append

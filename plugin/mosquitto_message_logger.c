@@ -82,6 +82,9 @@ Contributors:
 #define JSMN_STRICT
 #include "jsmn/jsmn.h"
 
+/* Hard-coded thin-edge.io payload redaction (see redact.c / redact.h). */
+#include "redact.h"
+
 #define UNUSED(A) (void)(A)
 
 #define PLUGIN_NAME "message-logger"
@@ -336,6 +339,7 @@ struct log_record {
 	const void *payload;
 	uint32_t payloadlen;
 	int has_payload;        /* whether payload/payloadlen apply */
+	int redacted;           /* 1 if the payload had sensitive values masked */
 };
 
 /*
@@ -513,6 +517,9 @@ static void emit_log(struct timespec *ts, const char *timestamp_iso, const struc
 			if(r->has_payload){
 				write_payload_fields(log_file, r->payload, r->payloadlen);
 			}
+			if(r->redacted){
+				fprintf(log_file, ",\"redacted\":true");
+			}
 			if(r->reason != INT_MIN){
 				fprintf(log_file, ",\"reason\":%d", r->reason);
 			}
@@ -556,6 +563,9 @@ static void emit_log(struct timespec *ts, const char *timestamp_iso, const struc
 			fprintf(stderr, ",\"payload\":\"%s\"", escaped_payload);
 			free(escaped_payload);
 		}
+		if(r->redacted){
+			fprintf(stderr, ",\"redacted\":true");
+		}
 		if(r->reason != INT_MIN){
 			fprintf(stderr, ",\"reason\":%d", r->reason);
 		}
@@ -584,6 +594,7 @@ static void log_record_init(struct log_record *r, const char *type)
 	r->payload = NULL;
 	r->payloadlen = 0;
 	r->has_payload = 0;
+	r->redacted = 0;
 }
 
 /* PUBLISH in (MOSQ_EVT_MESSAGE_IN) and PUBLISH out (MOSQ_EVT_MESSAGE_OUT). */
@@ -613,7 +624,20 @@ static int callback_message(int event, void *event_data, void *userdata)
 	r.payloadlen = ed->payloadlen;
 	r.has_payload = 1;
 
+	/* Redact sensitive values before rendering any representation. On a match
+	 * this returns a rewritten buffer that every encoding (payload /
+	 * payload_json / payload_base64 / payload_hex) is then derived from, so the
+	 * original secret cannot leak through base64/hex. free(NULL) is a no-op. */
+	char *redacted = NULL;
+	uint32_t redacted_len = 0;
+	if(redact_payload(ed->topic, ed->payload, ed->payloadlen, &redacted, &redacted_len)){
+		r.payload = redacted;
+		r.payloadlen = redacted_len;
+		r.redacted = 1;
+	}
+
 	emit_log(&ts, timestamp_iso, &r);
+	free(redacted);
 	return MOSQ_ERR_SUCCESS;
 }
 

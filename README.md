@@ -13,112 +13,61 @@ A standalone Mosquitto broker plugin that logs MQTT messages and control-plane e
 - **Configurable**: Via environment variables
 - **Auto-creating directories**: Log directories are created automatically if they don't exist
 - **Cross-compilation support**: Build for multiple architectures (ARM64, ARMv7, x86_64, etc.)
+- **Companion query CLI**: [`mqtt-log`](#querying-logs-with-mqtt-log) filters and formats the log files (by time, topic, type, payload, and more), reads archived `.gz` logs, and is built and released alongside the plugin
 
 ## Requirements
 
-- Mosquitto 2.1.x (plugin API v5)
-- GCC or Clang
-- Mosquitto development headers (`mosquitto-dev` or `libmosquitto-dev` package)
-- Optional: `just` command runner (`brew install just` or `cargo install just`)
+- [Zig](https://ziglang.org/download/) 0.16.0 or later (`brew install zig`) — bundles its own C compiler and cross-compiles to every target
+- A running **Mosquitto 2.1.x** broker (plugin API v5) to load the plugin into
+- Optional: `just` command runner (`brew install just`)
+
+The mosquitto development headers are **not** required: the build downloads the
+matching v2.1.2 headers automatically (declared in `build.zig.zon`).
 
 ## Building
 
-### Quick Start
+Zig drives the whole build: it bundles a C compiler and cross-compiles to every
+target with no extra toolchains, and the mosquitto headers are downloaded
+automatically. One build produces both the plugin and the
+[`mqtt-log` CLI](#querying-logs-with-mqtt-log).
 
 ```bash
-# Build the plugin
-make
-
-# Or with just
-just build
-```
-
-### Cross-Compilation
-
-The Makefile supports cross-compilation for different architectures.
-
-#### On Linux (Native Cross-Compilation)
-
-```bash
-# Install cross-compilation toolchains
-sudo apt-get install gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
-
-# For ARM64 (aarch64)
-make CROSS_COMPILE=aarch64-linux-gnu-
-
-# For ARMv7 (32-bit ARM)
-make CROSS_COMPILE=arm-linux-gnueabihf-
-
-# With just
-just build-arm64
-just build-armv7
-```
-
-#### On macOS (Docker-based Cross-Compilation)
-
-Cross-compiling on macOS requires Docker. This method works reliably and produces Linux binaries:
-
-```bash
-# Build all Linux architectures at once
-just build-linux-all
-
-# Or build specific architectures
-just build-linux-x86_64   # x86_64 Linux
-just build-linux-arm64    # ARM64/aarch64 Linux
-just build-linux-armv7    # ARMv7 32-bit Linux
-```
-
-Binaries will be saved to the `dist/` directory with architecture-specific names.
-
-**Requirements:**
-- Docker Desktop for Mac
-- `just` command runner: `brew install just`
-
-The Docker approach uses pre-built cross-compilation containers from [cross-rs](https://github.com/cross-rs/cross) with mosquitto development headers included.
-
-#### Using Zig (Recommended - Works on All Platforms)
-
-Zig provides the easiest cross-compilation experience and works on macOS, Linux, and Windows. Mosquitto headers are automatically downloaded as a dependency:
-
-```bash
-# Build all architectures
-zig build all -Doptimize=ReleaseSafe
-
-# Build a single architecture for the host
+# Build for the host (plugin -> zig-out/lib, CLI -> zig-out/bin)
 zig build -Doptimize=ReleaseSafe
+# or: just build          # builds every architecture into zig-out/dist/
+
+# Cross-compile for one target triple
+zig build -Dtarget=aarch64-linux-gnu -Doptimize=ReleaseSafe
+just build-target aarch64-linux-gnu                        # same, via just
+just build-target arm-linux-gnueabihf -Dcpu=arm1176jzf_s   # ARMv6
+
+# Build every supported architecture at once (into zig-out/dist/)
+zig build all -Doptimize=ReleaseSafe
 ```
 
-Binaries are saved under `zig-out/dist/`, e.g.
-`zig-out/dist/libmosquitto_message_logger-aarch64.so`.
-
-The plugin targets **mosquitto 2.1.x** (plugin API v5, callback-based). The
-matching headers (pinned to v2.1.2) are downloaded automatically as a build
-dependency declared in `build.zig.zon`.
-
-**Requirements:**
-- Zig 0.16.0 or later: [Download](https://ziglang.org/download/) or `brew install zig`
-- `just` command runner (optional): `brew install just`
-
-**Advantages of Zig:**
-- No Docker needed
-- No manual header installation required (mosquitto headers downloaded automatically)
-- Native cross-compilation for all targets
-- Fast compilation
-- Works identically on macOS, Linux, and Windows
+Supported targets: x86_64 / x86 / aarch64 / armv7 / armv6 / riscv64 (glibc and
+musl variants) plus aarch64 macOS. Works identically on macOS, Linux, and
+Windows.
 
 ### Releasing & Packaging (GoReleaser)
 
-[`.goreleaser.yaml`](.goreleaser.yaml) builds cross-compiled archives and Linux
-packages (`deb`, `rpm`, `apk`) using GoReleaser's
-[Zig builder](https://goreleaser.com/customization/builds/builders/zig/) — the
-actual compilation is still driven by `build.zig`.
+Each tool has its own GoReleaser config — [`plugin/.goreleaser.yaml`](plugin/.goreleaser.yaml)
+and [`cli/.goreleaser.yaml`](cli/.goreleaser.yaml) — building cross-compiled
+archives and Linux packages (`deb`, `rpm`, `apk`) with GoReleaser's
+[Zig builder](https://goreleaser.com/customization/builds/builders/zig/) (the
+actual compilation is still driven by the shared `build.zig`). Both publish to
+the **same** GitHub release/tag: the plugin config creates the release and the
+CLI config appends to it (`release.mode: append`), so the plugin runs first.
+Each writes to its own `dist/plugin` and `dist/cli` directory.
 
 ```bash
-just package        # build archives + packages into dist/ (snapshot, no publish)
-just package-check  # validate .goreleaser.yaml
+just package        # build both tools' archives + packages (snapshot, no publish)
+just package-check  # validate both configs
+just release        # real combined release (needs a git tag + GITHUB_TOKEN)
 
-# Or directly:
-goreleaser release --snapshot --clean --skip=publish,sign
+# Or directly (plugin first, then CLI appends to the release):
+goreleaser release -f plugin/.goreleaser.yaml --snapshot --clean --skip=publish,sign
+goreleaser release -f cli/.goreleaser.yaml    --snapshot --clean --skip=publish,sign
 ```
 
 Every package installs the plugin at the same **architecture-independent path**,
@@ -153,48 +102,40 @@ GoReleaser injects the release version into the plugin (reported to the broker v
 plain `zig build` reports `0.0.0-dev`; override it with
 `zig build -Dplugin-version=1.2.3`.
 
-### Custom Mosquitto Headers
-
-If you have mosquitto headers in a non-standard location:
-
-```bash
-make MOSQUITTO_INCLUDE=/path/to/mosquitto/include
-
-# Or with just
-just build-custom /path/to/mosquitto
-```
-
 ## Installation
 
-### System-wide Installation
+Install from a released Linux package (see
+[Releasing & Packaging](#releasing--packaging-goreleaser) for how they are built):
 
 ```bash
-sudo make install
-
-# Or with just
-just install
+sudo dpkg -i mosquitto-log-plugin_*_amd64.deb              # Debian/Ubuntu
+sudo rpm -i  mosquitto-log-plugin*.x86_64.rpm             # RHEL/Fedora
+sudo apk add --allow-untrusted mosquitto-log-plugin_*.apk  # Alpine
 ```
 
-Default installation path: `/usr/local/lib/mosquitto_message_logger.so`
+The package installs the plugin to the fixed path
+`/usr/lib/mosquitto/mosquitto_message_logger.so`. The `mqtt-log` CLI ships as a
+separate `mqtt-log` package installed to `/usr/bin`.
 
-### Custom Installation Path
+Alternatively, copy a locally built `.so` wherever you like and point
+`mosquitto.conf` at it:
 
 ```bash
-sudo make install PREFIX=/opt/mosquitto
-sudo make install DESTDIR=/tmp/staging LIBDIR=/usr/lib/mosquitto
+sudo cp zig-out/lib/libmosquitto_message_logger.so \
+        /usr/lib/mosquitto/mosquitto_message_logger.so
 ```
 
 ## Configuration
 
 ### mosquitto.conf
 
-Add the plugin to your Mosquitto configuration:
+Point your Mosquitto configuration at the installed `.so`:
 
 ```conf
-# If installed system-wide
-plugin /usr/local/lib/mosquitto_message_logger.so
+# Packaged install path
+plugin /usr/lib/mosquitto/mosquitto_message_logger.so
 
-# Or use absolute path to the .so file
+# Or an absolute path to any built .so
 plugin /path/to/mosquitto_message_logger.so
 ```
 
@@ -287,6 +228,113 @@ MQTT_LOG: {"timestamp":1770964807.822347000,"message":{"tst":"2026-02-13T06:40:0
 mosquitto -v 2>&1 | grep "MQTT_LOG:"
 ```
 
+## Querying logs with `mqtt-log`
+
+The repository also ships a companion command-line tool, **`mqtt-log`**, that
+filters and formats the JSON-Lines files written above. It is built by the same
+`build.zig` (a standalone, pure-Zig executable — no mosquitto headers), so
+`zig build` produces both the plugin and the CLI, and a release ships both. The
+CLI is packaged separately as `mqtt-log` (installed to `/usr/bin`) and is also
+included in the release archives.
+
+Filters apply across all matched files, so archived (including `.gz`) logs are
+searched together; results are merged and sorted by time.
+
+```bash
+# Everything from the default log directory (/var/log/mosquitto)
+mqtt-log
+
+# A specific directory or explicit files (.log or .gz)
+mqtt-log --dir /var/log/mosquitto
+mqtt-log mqtt-messages-20260213.log archive/mqtt-messages-20260212.log.gz
+
+# Time window: absolute ISO 8601, relative offsets, or Unix seconds (inclusive)
+mqtt-log --from 2026-02-13T06:00:00Z --to 2026-02-13T07:00:00Z
+mqtt-log --from -1h                     # last hour
+mqtt-log --from -2d --to -1d            # the day before yesterday
+
+# Filter by MQTT/protocol characteristics
+mqtt-log --type publish_in,publish_out  # event type
+mqtt-log --encoding json                # payload encoding: json|text|binary
+mqtt-log --topic 'home/+/temperature'   # MQTT topic filter (+ and # wildcards)
+mqtt-log --topic-contains temperature   # topic substring
+mqtt-log --client sensor01              # client id
+mqtt-log --qos 1,2 --retain             # QoS level(s) and retained flag
+mqtt-log --min-size 10 --max-size 256   # payload_len bounds (bytes)
+mqtt-log --payload-contains '"temp"'    # literal substring of the decoded payload
+mqtt-log --payload-matches 'temp[0-9]+' # regex on the decoded payload
+mqtt-log --reason 0                      # disconnect reason code
+
+# Choose fields, output format, order, and how many
+mqtt-log --fields timestamp,topic,payload            # projection
+mqtt-log --output json                               # json | ndjson | text | list | table
+mqtt-log --format '{timestamp} {topic} {payload}'    # custom line template
+mqtt-log --sort-by newest --head 20                  # newest 20 (or --tail N)
+```
+
+### Count assertions (for tests)
+
+`--min-count` / `--max-count` (both inclusive) turn a query into an assertion on
+how many messages matched. If the count is out of range the process exits **1**
+and prints a message to stderr listing the expected/actual counts and the active
+criteria; otherwise it exits **0**. `--quiet` (`-q`) suppresses the matched
+records so only the assertion result is emitted — handy in test scripts. The
+count is evaluated on the full match set, before any `--head`/`--tail` limit.
+
+```bash
+# Assert exactly one retained birth message on a topic (fail the test otherwise)
+mqtt-log --topic 'devices/+/status' --retain --min-count 1 --max-count 1 -q
+
+# Assert at least one publish arrived in the last minute
+mqtt-log --topic 'home/#' --type publish_in --from -1m --min-count 1 -q
+
+# Assert no error events were logged
+mqtt-log --type disconnect --reason 1 --max-count 0 -q
+
+# Assert a payload matches a regex (--payload-matches) or contains a literal
+mqtt-log --topic 'sensors/+/temp' --payload-matches '^[0-9]+(\.[0-9]+)?$' --min-count 1 -q
+mqtt-log --payload-contains 'ERROR' --max-count 0 -q
+```
+
+A failed assertion looks like:
+
+```
+mqtt-log: assertion failed: expected at least 1 matching message(s), but found 0
+  criteria:
+    dir: /var/log/mosquitto (recursive)
+    from: -1m (2026-07-06T15:55:39Z)
+    type: publish_in
+    topic: home/#
+```
+
+Relative (`-1m`) and Unix-seconds `--from`/`--to` values are shown with their
+resolved absolute UTC instant in parentheses, so the assertion is unambiguous.
+
+**Payload matching.** `--payload-contains <S>` (literal substring) and
+`--payload-matches <REGEX>` both match against the **decoded payload** and
+combine with the count assertions to check message content. The regex engine is
+a small built-in (no external dependency) supporting `.`, `*`, `+`, `?`,
+`{n}`/`{n,}`/`{n,m}`, `|`, `(...)`, character classes `[...]`/`[^...]` with
+`a-z` ranges, anchors `^`/`$`, and the shorthands `\d \w \s` (and `\D \W \S`).
+Matching is unanchored — `--payload-matches ON` matches any payload containing
+`ON`; use `^ON$` for an exact match.
+
+Exit codes: `0` success (assertions passed), `1` a count assertion failed,
+`2` usage/argument error.
+
+Output modes:
+
+| `--output` | Description                                                    |
+|------------|----------------------------------------------------------------|
+| `text`     | Human-readable single `key=value` line per record (default)   |
+| `list`     | One `key=value` per line, blank line between records (like PowerShell's Format-List) |
+| `table`    | Column-aligned rows with a header (like PowerShell's Format-Table); numeric columns right-aligned. Use `--fields` to pick/narrow columns. The header and separator are clipped to the terminal width so they never wrap; data rows print in full |
+| `ndjson`   | One JSON object per line — pipe straight into `jq`             |
+| `json`     | A single JSON array                                            |
+| `--format` | Custom template; `{field}` is substituted, `{payload}` decodes the payload (works for binary via base64), `{{`/`}}` are literal braces |
+
+Run `mqtt-log --help` for the full flag reference.
+
 ## Testing
 
 ### Automated Functional Tests (Docker)
@@ -304,13 +352,12 @@ See [tests/README.md](tests/README.md) for details and coverage.
 
 ### Local Test Run
 
-Use the `just` command to run a test instance:
-
 ```bash
 just test-local
 ```
 
-This starts a local mosquitto instance on port 1883 with the plugin loaded, logging to the current directory.
+Starts a local mosquitto instance with the plugin loaded, logging to the current
+directory.
 
 ### Manual Testing
 
@@ -358,6 +405,42 @@ than 10% control characters (excluding tab/newline/carriage-return).
 **Stderr** output keeps its compact, human-oriented `mosquitto_sub` form: the
 JSON-escaped `payload` plus a hex `payload_hex` field.
 
+## Payload Redaction
+
+Sensitive values are masked **before** a message is written, so secrets never
+reach the log file or stderr. Redaction rewrites the raw payload once and every
+representation (`payload`, `payload_json`, `payload_base64`, and the stderr
+`payload_hex`) is derived from the masked bytes — no encoding can leak the
+original value. The masked value is the fixed string `***`.
+
+The rules are **hard-coded** for thin-edge.io / Cumulocity (this is not a
+generic tool — see [`plugin/redact.c`](plugin/redact.c)):
+
+| Rule | Match | Result |
+|------|-------|--------|
+| Cumulocity JWT | topic `c8y/s/dat`, payload `71,<jwt>` | `71,***` (template id kept, token masked) |
+| Device credentials | topic `c8y/s/dcr`, payload `70,<tenant>,<user>,<pass>` | `70,<tenant>,***,***` (id + tenant kept; username and password masked) |
+| JSON keys | any JSON payload | the value of `password`, `token`, `access_token`, `secret`, `apikey` (case-insensitive, at any depth) is replaced with `***` |
+
+JSON-key matching is **structural** (via the same jsmn tokeniser used for
+`payload_json`), so only object **keys** are redacted — a same-named string
+*value* such as `{"note":"the password is safe"}` is left untouched. A matched
+value that is itself an object or array is masked wholesale (`"secret":"***"`).
+Non-JSON payloads on non-matching topics are logged unchanged.
+
+Any record whose payload was masked carries a `"redacted":true` field (in both
+the file and stderr output) so redacted messages are easy to spot and filter;
+records that were not touched omit the field entirely:
+
+```json
+{"timestamp":"...","type":"publish_in","client_id":"c8y-mapper","topic":"c8y/s/dat","qos":0,"retain":0,"payload_len":6,"payload_encoding":"text","payload":"71,***","payload_base64":"NzEsKioq","redacted":true}
+```
+
+Adding a sensitive key or a new sensitive topic is a small edit to the rule set
+in `plugin/redact.c` followed by a rebuild. Redaction applies only to messages
+logged **after** the change — pre-existing log files are not retroactively
+masked.
+
 ## Performance Considerations
 
 - File I/O is buffered and only happens on message receipt
@@ -374,31 +457,46 @@ For high-throughput scenarios, consider:
 
 ### Project Structure
 
+The two tools are separated into their own directories, sharing one `build.zig`
+that produces both:
+
 ```
-mosquitto-message-logger/
-├── mosquitto_message_logger.c   # Plugin source code
-├── build.zig                      # Zig build (cross-compilation)
-├── build.zig.zon                  # Mosquitto 2.1.x header dependency
-├── .goreleaser.yaml               # Release archives + deb/rpm/apk packaging
-├── compat/cjson/cJSON.h           # Stub satisfying a 2.1 header reference we never call
-├── compat/jsmn/jsmn.h             # Vendored jsmn (MIT) — validates JSON payloads for payload_json
-├── tests/                         # Docker-based functional test suite
-├── justfile                       # Convenience commands (requires just)
-├── README.md                      # This file
-├── LICENSE                        # Apache-2.0
-└── .gitignore                     # Git ignore rules
+mosquitto-log/
+├── plugin/                              # The mosquitto broker plugin (C)
+│   ├── mosquitto_message_logger.c       #   Plugin source code
+│   ├── redact.c / redact.h              #   Hard-coded payload redaction (thin-edge/Cumulocity)
+│   ├── compat/cjson/cJSON.h             #   Stub satisfying a 2.1 header reference we never call
+│   ├── compat/jsmn/jsmn.h               #   Vendored jsmn (MIT) — validates JSON payloads for payload_json
+│   └── .goreleaser.yaml                 #   Plugin release config (creates the GitHub release)
+├── cli/                                 # The mqtt-log query CLI (Zig)
+│   ├── src/*.zig                        #   CLI source (main, options, filter, output, sources, time, regex)
+│   └── .goreleaser.yaml                 #   CLI release config (appends to the release)
+├── build.zig                            # Shared Zig build — builds both plugin and CLI
+├── build.zig.zon                        # Mosquitto 2.1.x header dependency
+├── tests/                               # Docker-based functional test suite (plugin)
+├── justfile                             # Convenience commands (requires just)
+├── README.md                            # This file
+├── LICENSE                              # Apache-2.0
+└── .gitignore                           # Git ignore rules
 ```
 
-### Building with Debug Symbols
+### Debug Build
 
 ```bash
-make CFLAGS="-Wall -Werror -g -O0 -fPIC"
+zig build                     # Debug is the default optimize mode
+zig build -Doptimize=Debug    # explicit
+```
+
+### Running the CLI unit tests
+
+```bash
+just test-cli    # or: zig build test
 ```
 
 ### Code Formatting
 
 ```bash
-just format  # Requires clang-format
+just format  # clang-format on the plugin C source
 ```
 
 ## License

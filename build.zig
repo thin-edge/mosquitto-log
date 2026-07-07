@@ -40,6 +40,24 @@ pub fn build(b: *std.Build) void {
     const lib = addPlugin(b, target, optimize, mosquitto_dep, plugin_version);
     b.installArtifact(lib);
 
+    // --- Companion CLI: a standalone log query/filter tool ---
+    // Pure Zig, no dependency on the mosquitto headers. Built and installed
+    // alongside the plugin so one `zig build` (and one release) ships both.
+    const cli = addCli(b, target, optimize);
+    b.installArtifact(cli);
+
+    // Let `zig build run -- <args>` drive the CLI during development.
+    const run_cli = b.addRunArtifact(cli);
+    if (b.args) |args| run_cli.addArgs(args);
+    const run_step = b.step("run", "Build and run the mqtt-log CLI");
+    run_step.dependOn(&run_cli.step);
+
+    // Unit tests for the CLI modules.
+    const cli_tests = b.addTest(.{ .root_module = cliModule(b, target, optimize) });
+    const run_cli_tests = b.addRunArtifact(cli_tests);
+    const test_step = b.step("test", "Run CLI unit tests");
+    test_step.dependOn(&run_cli_tests.step);
+
     // Also install under bin/ with a stable, architecture-independent name.
     // GoReleaser's zig builder expects the artifact at zig-out/<target>/bin/<name>,
     // and a fixed name means users reference the same plugin path in mosquitto.conf
@@ -124,7 +142,41 @@ pub fn build(b: *std.Build) void {
         );
 
         build_all_step.dependOn(&install_step.step);
+
+        // Cross-compile the CLI for the same target:
+        //   dist/mqtt-log-<arch>
+        const target_cli = addCli(b, resolved_target, optimize);
+        const cli_install = b.addInstallFile(
+            target_cli.getEmittedBin(),
+            b.fmt("dist/mqtt-log-{s}", .{target_name}),
+        );
+        build_all_step.dependOn(&cli_install.step);
     }
+}
+
+/// The CLI's root module. Pure Zig — no libc, no mosquitto headers.
+fn cliModule(
+    b: *std.Build,
+    resolved_target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) *std.Build.Module {
+    return b.createModule(.{
+        .root_source_file = b.path("cli/src/main.zig"),
+        .target = resolved_target,
+        .optimize = optimize,
+    });
+}
+
+/// Build the standalone `mqtt-log` query CLI.
+fn addCli(
+    b: *std.Build,
+    resolved_target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) *std.Build.Step.Compile {
+    return b.addExecutable(.{
+        .name = "mqtt-log",
+        .root_module = cliModule(b, resolved_target, optimize),
+    });
 }
 
 /// Build the plugin as a dynamic library against the given mosquitto headers.
@@ -150,8 +202,11 @@ fn addPlugin(
     for (cflags, 0..) |f, i| flags[i] = f;
     flags[cflags.len] = b.fmt("-DPLUGIN_VERSION=\"{s}\"", .{plugin_version});
 
-    mod.addCSourceFile(.{
-        .file = b.path("mosquitto_message_logger.c"),
+    mod.addCSourceFiles(.{
+        .files = &.{
+            "plugin/mosquitto_message_logger.c",
+            "plugin/redact.c",
+        },
         .flags = flags,
     });
 
@@ -163,7 +218,7 @@ fn addPlugin(
     // Mosquitto 2.1's public headers reference <cjson/cJSON.h> for a function
     // this plugin never calls. The compat/ stub satisfies that forward declaration
     // without requiring the full cJSON library.
-    mod.addIncludePath(b.path("compat"));
+    mod.addIncludePath(b.path("plugin/compat"));
 
     const lib = b.addLibrary(.{
         .name = "mosquitto_message_logger",
