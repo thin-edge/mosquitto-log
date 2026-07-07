@@ -25,7 +25,7 @@ jobs:
     name: Build & publish release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # GoReleaser needs full history + tags
 
@@ -37,7 +37,7 @@ jobs:
         with:
           version: ${{ steps.zig.outputs.version }}
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           install-only: true
 
@@ -66,7 +66,7 @@ jobs:
       # On a manual dry run, keep the snapshot artifacts for inspection.
       - name: Upload snapshot artifacts (dry run only)
         if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: snapshot-dist
           path: |
