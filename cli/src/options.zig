@@ -285,7 +285,9 @@ pub const usage =
     \\
     \\TIME FILTER (inclusive):
     \\        --from <TS>         Lower bound. ISO 8601 (2025-01-01T00:10:00Z),
-    \\                            relative (-1h, -30m, -2d, -1w), Unix seconds, or now
+    \\                            relative (-1h, -30m, -2d, -1w), Unix seconds
+    \\                            (integer or fractional, e.g. 1770964807 or
+    \\                            1770964807.5), or now
     \\        --to <TS>           Upper bound (same formats)
     \\
     \\FIELD FILTERS (repeatable / comma-separated where noted):
